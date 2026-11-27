@@ -272,6 +272,8 @@ Technical deep dive: [docs/architecture.md](docs/architecture.md).
 - [Architecture](docs/architecture.md): protocol, TLS, HTTP/2 and HPACK internals.
 - [Shared hosting](docs/shared-hosting.md): installation and setup on cPanel,
   FTP or other hosting providers.
+- [Why curl gets a 403 while your browser gets a 200](https://dev.to/seomavares/why-curl-gets-a-403-while-your-browser-gets-a-200-28ih):
+  the article behind the project, with usage examples.
 
 ## Resources
 
