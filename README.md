@@ -114,7 +114,7 @@ use NativeHttp\Client;
 >
 > ```json
 > {
->   "repositories": [{ "type": "vcs", "url": "https://github.com/YOUR_USER/native-http" }],
+>   "repositories": [{ "type": "vcs", "url": "https://github.com/SeoMavares/native-http" }],
 >   "require": { "nativehttp/client": "^1.0" }
 > }
 > ```

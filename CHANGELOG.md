@@ -7,6 +7,30 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-26
+
+### Added
+
+- `examples/09-media.php`: saves a direct media URL to disk.
+- Documentation for HPACK resources, test groups and request safeguards.
+
+### Fixed
+
+- Redirect `Location` values are resolved per RFC 3986 (`?query`, `../` and
+  fragments).
+- `Authorization`, `Cookie` and `Proxy-Authorization` are dropped when a
+  redirect changes origin.
+- Chunked HTTP/1.1 bodies, trailers and informational `1xx` responses are
+  validated instead of being truncated silently.
+- HTTP/2 frames are filtered by stream, `CONTINUATION` is enforced, padding is
+  checked, and `SETTINGS` must be a valid connection frame.
+- A `Host` header supplied by the caller no longer duplicates the authority.
+
+### Changed
+
+- Client options, HTTP methods and URLs are validated strictly; unknown options
+  throw `InvalidArgumentException`.
+
 ## [1.0.0] - 2026-11-25
 
 ### Added
@@ -38,5 +62,6 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   identical.
 - No TLS session resumption, no 0-RTT, no HTTP/3 and no OCSP.
 
-[Unreleased]: https://github.com/YOUR_USER/native-http/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/YOUR_USER/native-http/releases/tag/v1.0.0
+[Unreleased]: https://github.com/SeoMavares/native-http/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/SeoMavares/native-http/releases/tag/v1.1.0
+[1.0.0]: https://github.com/SeoMavares/native-http/releases/tag/v1.0.0
