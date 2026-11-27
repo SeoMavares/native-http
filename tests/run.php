@@ -8,6 +8,8 @@ declare(strict_types=1);
  *   php tests/run.php --offline    # local tests only (no network)
  *   php tests/run.php hpack http   # only the given groups
  *
+ * Groups: hpack, tls, http, fingerprint.
+ *
  * No Composer, no PHPUnit: plain PHP.
  */
 
@@ -411,6 +413,51 @@ $runner->check('rejects an invalid header name', static function (): void {
     Asserts::throws(
         InvalidArgumentException::class,
         static fn() => (new NativeHttp\Client(['timeout' => 5]))->get('https://example.com/', ['Bad Name' => 'x'])
+    );
+});
+
+$runner->check('rejects unknown and invalid options', static function (): void {
+    Asserts::throws(
+        InvalidArgumentException::class,
+        static fn() => new NativeHttp\Client(['timeout' => 0])
+    );
+    Asserts::throws(
+        InvalidArgumentException::class,
+        static fn() => new NativeHttp\Client(['unknown_option' => true])
+    );
+});
+
+$runner->check('resolves relative redirects and normalizes dot segments', static function (): void {
+    $client = new NativeHttp\Client();
+    $method = new ReflectionMethod(NativeHttp\Client::class, 'resolveLocation');
+    $method->setAccessible(true);
+    Asserts::same(
+        'https://example.com/a/c',
+        $method->invoke($client, 'https://example.com/a/b/page', '../c')
+    );
+    Asserts::same(
+        'https://example.com/a/b/page?x=1',
+        $method->invoke($client, 'https://example.com/a/b/page', '?x=1')
+    );
+});
+
+$runner->check('decodes valid chunked HTTP/1.1 data', static function (): void {
+    $client = new NativeHttp\Client();
+    $method = new ReflectionMethod(NativeHttp\Client::class, 'decodeChunked');
+    $method->setAccessible(true);
+    Asserts::same(
+        'Wikipedia',
+        $method->invoke($client, "4\r\nWiki\r\n5\r\npedia\r\n0\r\n\r\n")
+    );
+});
+
+$runner->check('rejects malformed chunked HTTP/1.1 data', static function (): void {
+    $client = new NativeHttp\Client();
+    $method = new ReflectionMethod(NativeHttp\Client::class, 'decodeChunked');
+    $method->setAccessible(true);
+    Asserts::throws(
+        NativeHttp\Exception\HttpException::class,
+        static fn() => $method->invoke($client, "zz\r\nbad\r\n")
     );
 });
 

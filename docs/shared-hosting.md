@@ -13,6 +13,7 @@ Then, in **Select PHP Version → Extensions**, make sure these are enabled:
 - `openssl` (required)
 - `zlib` (required)
 - `gmp` (recommended) or, instead, `bcmath`
+- `brotli` or `zstd` only if you need those response encodings
 
 Without `openssl` the library cannot work: it provides X25519, AES-GCM and
 certificate verification.
@@ -158,6 +159,8 @@ exit(0);
 | `Could not decompress` | The server used `br` or `zstd` | Enable that extension, or stop advertising it |
 | 403 on a specific site | Extra defences (CAPTCHA, signed cookies) | Not a library bug |
 | Slow, 1–2 s per request | New TLS handshake on every call | Expected behaviour |
+| Unknown client option | An option name is misspelled | Use the options listed in the README |
+| Malformed redirect or chunk | Server response is incomplete or invalid | Inspect the response and report the server URL |
 
 ## 6. Verifying the fingerprint
 

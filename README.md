@@ -28,12 +28,15 @@ echo $response['body'];     // raw content
 ## Contents
 
 - [Features](#features)
+- [What can I use it for?](#what-can-i-use-it-for)
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Quick start](#quick-start)
 - [API](#api)
 - [Examples](#examples)
 - [How it works](#how-it-works)
+- [Documentation](#documentation)
+- [Resources](#resources)
 - [Testing](#testing)
 - [Limitations](#limitations)
 - [Project layout](#project-layout)
@@ -55,6 +58,25 @@ echo $response['body'];     // raw content
 | **Zero dependencies** | Works with a single `require`. Composer is optional. |
 | **Shared-hosting friendly** | No SSH, no compiled extensions, no extra ports. |
 | **PHP 8.1+** | Verified on 8.3 and 8.4; only needs `openssl` and `zlib`. |
+
+## What can I use it for?
+
+NativeHttp is useful for browser-like HTTPS requests from PHP, including
+workflows where a site expects browser-style TLS and HTTP/2 behavior. Common
+use cases include:
+
+- Calling JSON APIs and retrieving HTML pages.
+- Automating requests from cron jobs or shared hosting where installing
+  `curl` or extra PHP extensions is inconvenient.
+- Extracting links from pages and requesting the resources they point to,
+  including direct media URLs such as MP4 files.
+- Debugging TLS and HTTP/2 behavior with the included logger and fingerprint
+  example.
+
+NativeHttp returns the response body sent by the server. JavaScript included in
+that HTML is returned as source; NativeHttp does not evaluate it in a browser
+engine. If the server has already generated content before sending the
+response, that generated content is available in the returned body.
 
 ## Requirements
 
@@ -220,11 +242,13 @@ See [`examples/`](examples/):
 | [`06-errors.php`](examples/06-errors.php) | Exception handling |
 | [`07-fingerprint.php`](examples/07-fingerprint.php) | JA3, JA4 and HTTP/2 fingerprint |
 | [`08-cron.php`](examples/08-cron.php) | Cronjob script with locking and logging |
+| [`09-media.php`](examples/09-media.php) | Download an authorized direct media URL |
 | [`web/index.php`](examples/web/index.php) | Web demo: fetch any URL |
 
 ```bash
 php examples/01-quickstart.php
 php examples/07-fingerprint.php
+php examples/09-media.php "https://example.com/video.mp4" video.mp4
 ```
 
 ## How it works
@@ -247,6 +271,18 @@ speaks the protocol itself.
 
 Technical deep dive: [docs/architecture.md](docs/architecture.md).
 
+## Documentation
+
+- [Architecture](docs/architecture.md): protocol, TLS, HTTP/2 and HPACK internals.
+- [Shared hosting](docs/shared-hosting.md): installation and setup on cPanel,
+  FTP or other hosting providers.
+
+## Resources
+
+[resources/hpack-tables.php](resources/hpack-tables.php) contains the HPACK static
+table and Huffman codes used by the HTTP/2 implementation. It is loaded on
+demand by `Hpack.php`; it does not need to be included directly.
+
 ## Testing
 
 No dependencies: Composer and PHPUnit are not needed.
@@ -263,6 +299,9 @@ The suite includes the official **RFC 7541 appendix C vectors** for HPACK,
 certificate validation against `badssl.com`, redirects, compression, and a live
 fingerprint check against `tls.peet.ws`. Network tests are retried up to three
 times so CI does not fail on a transient DNS or connection error.
+
+The tests do not require PHPUnit or network mocking. PHP 8.3 with GMP passed
+the complete suite: 28/28 tests.
 
 ## Limitations
 
@@ -293,12 +332,25 @@ native-http/
 │       ├── HttpException.php
 │       └── TlsException.php
 ├── resources/
-│   └── hpack-tables.php        ← RFC 7541 tables
-├── examples/                   ← 8 examples + web demo
-├── tests/run.php               ← test suite
+│   └── hpack-tables.php        ← RFC 7541 static and Huffman tables
+├── examples/
+│   ├── 01-quickstart.php
+│   ├── 02-headers.php
+│   ├── 03-post-json.php
+│   ├── 04-redirects.php
+│   ├── 05-compression.php
+│   ├── 06-errors.php
+│   ├── 07-fingerprint.php
+│   ├── 08-cron.php
+│   ├── 09-media.php
+│   └── web/index.php           ← browser-based fetch demo
+├── tests/
+│   └── run.php                 ← HPACK, TLS, HTTP and fingerprint tests
 ├── docs/
-│   ├── architecture.md
-│   └── shared-hosting.md
+│   ├── architecture.md         ← internal protocol documentation
+│   └── shared-hosting.md       ← FTP/cPanel installation guide
+├── README.md
+├── CHANGELOG.md
 ├── composer.json
 └── LICENSE
 ```

@@ -6,14 +6,7 @@ namespace NativeHttp;
 use InvalidArgumentException;
 use NativeHttp\Exception\HttpException;
 
-/**
- * HTTP client with a native TLS 1.3 and HTTP/2 stack.
- *
- * - Its own TLS 1.3 handshake, with a ClientHello that mirrors Chrome 152
- *   (see Tls13Socket).
- * - HTTP/2 using Chrome's SETTINGS and WINDOW_UPDATE values.
- * - Chrome's default XHR/fetch request headers.
- */
+/** HTTP client with a native TLS 1.3 and HTTP/2 stack. */
 final class Client
 {
     /** @var array<string, mixed> */
@@ -40,6 +33,53 @@ final class Client
             'header_table_size' => 65536,
             'logger' => null,
         ];
+        $this->validateOptions();
+    }
+
+    private function validateOptions(): void
+    {
+        $known = ['timeout', 'verify_peer', 'ca_file', 'max_redirects', 'alpn', 'header_table_size', 'logger'];
+        foreach (array_keys($this->options) as $name) {
+            if (!in_array($name, $known, true)) {
+                throw new InvalidArgumentException('Unknown client option: ' . $name);
+            }
+        }
+        if (!is_int($this->options['timeout']) && !is_float($this->options['timeout'])) {
+            throw new InvalidArgumentException('The timeout option must be numeric.');
+        }
+        $timeout = (float) $this->options['timeout'];
+        if (!is_finite($timeout) || $timeout <= 0) {
+            throw new InvalidArgumentException('The timeout option must be greater than zero.');
+        }
+        if (!is_bool($this->options['verify_peer'])) {
+            throw new InvalidArgumentException('The verify_peer option must be boolean.');
+        }
+        if ($this->options['ca_file'] !== null
+            && (!is_string($this->options['ca_file']) || $this->options['ca_file'] === '')) {
+            throw new InvalidArgumentException('The ca_file option must be null or a non-empty string.');
+        }
+        if (!is_int($this->options['max_redirects']) || $this->options['max_redirects'] < 0) {
+            throw new InvalidArgumentException('The max_redirects option must be a non-negative integer.');
+        }
+        if (!is_array($this->options['alpn']) || $this->options['alpn'] === []) {
+            throw new InvalidArgumentException('The alpn option must be a non-empty list.');
+        }
+        foreach ($this->options['alpn'] as $protocol) {
+            if (!is_string($protocol) || !in_array($protocol, ['h2', 'http/1.1'], true)) {
+                throw new InvalidArgumentException('ALPN protocols must be h2 or http/1.1.');
+            }
+        }
+        if (count(array_unique($this->options['alpn'])) !== count($this->options['alpn'])) {
+            throw new InvalidArgumentException('The alpn option cannot contain duplicates.');
+        }
+        if (!is_int($this->options['header_table_size'])
+            || $this->options['header_table_size'] < 0
+            || $this->options['header_table_size'] > 16777216) {
+            throw new InvalidArgumentException('The header_table_size option must be between 0 and 16777216.');
+        }
+        if ($this->options['logger'] !== null && !is_callable($this->options['logger'])) {
+            throw new InvalidArgumentException('The logger option must be callable or null.');
+        }
     }
 
     /**
@@ -58,10 +98,15 @@ final class Client
     public function request(string $method, string $url, array $headers = [], ?string $body = null): array
     {
         $method = strtoupper($method);
+        if (preg_match("/^[!#$%&'*+\-.^_`|~0-9A-Z]+$/", $method) !== 1) {
+            throw new InvalidArgumentException('Invalid HTTP method: ' . $method);
+        }
         $headers = $this->normalizeHeaders($headers);
         $redirects = 0;
+        $previousUrl = $url;
 
         while (true) {
+            $this->assertValidHttpsUrl($url);
             $response = $this->sendOnce($method, $url, $headers, $body);
 
             $location = $response['headers']['location'] ?? null;
@@ -74,6 +119,12 @@ final class Client
                     $body = null;
                 }
                 $url = $this->resolveLocation($url, $location);
+                if (!$this->sameOrigin($previousUrl, $url)) {
+                    foreach (['authorization', 'cookie', 'proxy-authorization'] as $name) {
+                        unset($headers[$name]);
+                    }
+                }
+                $previousUrl = $url;
                 $redirects++;
                 continue;
             }
@@ -88,13 +139,7 @@ final class Client
      */
     private function sendOnce(string $method, string $url, array $headers, ?string $body): array
     {
-        $parts = parse_url($url);
-        if ($parts === false || !isset($parts['host'], $parts['scheme'])) {
-            throw new InvalidArgumentException('Invalid URL: ' . $url);
-        }
-        if (strtolower($parts['scheme']) !== 'https') {
-            throw new InvalidArgumentException('Only HTTPS URLs are supported.');
-        }
+        $parts = $this->assertValidHttpsUrl($url);
 
         $host = $parts['host'];
         $port = (int) ($parts['port'] ?? 443);
@@ -156,7 +201,9 @@ final class Client
 
         $merged = $defaults;
         foreach ($headers as $name => $value) {
-            $merged[$name] = $value;
+            if ($name !== 'host') {
+                $merged[$name] = $value;
+            }
         }
 
         $fields = [
@@ -217,6 +264,7 @@ final class Client
         $headers = [];
         $data = '';
         $streamEnded = false;
+        $pendingContinuation = false;
         $deadline = microtime(true) + (float) $this->options['timeout'];
 
         while (!$streamEnded) {
@@ -237,12 +285,29 @@ final class Client
                 $type = $frame['type'];
                 $flags = $frame['flags'];
                 $payload = $frame['payload'];
+                $frameStream = $frame['stream'];
+
+                if ($frameStream !== 0 && $frameStream !== $streamId && $type !== 3) {
+                    continue;
+                }
+                if ($pendingContinuation && $type !== 9) {
+                    throw new HttpException('HTTP/2 CONTINUATION frame is required.');
+                }
 
                 switch ($type) {
                     case 0: // DATA
-                        if (($flags & 0x8) !== 0 && $payload !== '') {
+                        if ($frameStream !== $streamId) {
+                            break;
+                        }
+                        if (($flags & 0x8) !== 0) {
+                            if ($payload === '') {
+                                throw new HttpException('Invalid padded HTTP/2 DATA frame.');
+                            }
                             $padding = ord($payload[0]);
-                            $payload = substr($payload, 1, strlen($payload) - 1 - $padding);
+                            if ($padding >= strlen($payload)) {
+                                throw new HttpException('Invalid HTTP/2 DATA padding.');
+                            }
+                            $payload = substr($payload, 1, strlen($payload) - $padding - 1);
                         }
                         if ($payload !== '') {
                             $data .= $payload;
@@ -257,17 +322,31 @@ final class Client
                         break;
 
                     case 1: // HEADERS
-                        if (($flags & 0x8) !== 0 && $payload !== '') {
+                        if ($frameStream !== $streamId) {
+                            break;
+                        }
+                        if (($flags & 0x8) !== 0) {
+                            if ($payload === '') {
+                                throw new HttpException('Invalid padded HTTP/2 HEADERS frame.');
+                            }
                             $padding = ord($payload[0]);
-                            $payload = substr($payload, 1, strlen($payload) - 1 - $padding);
+                            if ($padding >= strlen($payload)) {
+                                throw new HttpException('Invalid HTTP/2 HEADERS padding.');
+                            }
+                            $payload = substr($payload, 1, strlen($payload) - $padding - 1);
                         }
                         if (($flags & 0x20) !== 0) {
+                            if (strlen($payload) < 5) {
+                                throw new HttpException('Invalid HTTP/2 HEADERS priority.');
+                            }
                             $payload = substr($payload, 5);
                         }
                         $pendingBlock .= $payload;
                         if (($flags & 0x4) !== 0) {
                             [$status, $headers] = $this->decodeHeaderBlock($hpack, $pendingBlock, $status, $headers);
                             $pendingBlock = '';
+                        } else {
+                            $pendingContinuation = true;
                         }
                         if (($flags & 0x1) !== 0) {
                             $streamEnded = true;
@@ -275,15 +354,25 @@ final class Client
                         break;
 
                     case 9: // CONTINUATION
+                        if ($frameStream !== $streamId || !$pendingContinuation) {
+                            throw new HttpException('Unexpected HTTP/2 CONTINUATION frame.');
+                        }
                         $pendingBlock .= $payload;
                         if (($flags & 0x4) !== 0) {
                             [$status, $headers] = $this->decodeHeaderBlock($hpack, $pendingBlock, $status, $headers);
                             $pendingBlock = '';
+                            $pendingContinuation = false;
                         }
                         break;
 
                     case 4: // SETTINGS
+                        if ($frameStream !== 0) {
+                            throw new HttpException('Invalid HTTP/2 SETTINGS frame stream.');
+                        }
                         if (($flags & 0x1) === 0) {
+                            if (strlen($payload) % 6 !== 0) {
+                                throw new HttpException('Invalid HTTP/2 SETTINGS payload.');
+                            }
                             $tls->writeApplicationData($this->frame(4, 0x1, 0, ''));
                         }
                         break;
@@ -295,12 +384,19 @@ final class Client
                         break;
 
                     case 8: // WINDOW_UPDATE
-                    case 2: // PRIORITY
-                    case 5: // PUSH_PROMISE
                         break;
 
+                    case 2: // PRIORITY
+                        break;
+
+                    case 5: // PUSH_PROMISE
+                        throw new HttpException('Unexpected HTTP/2 PUSH_PROMISE frame.');
+
                     case 3: // RST_STREAM
-                        throw new HttpException('The server reset the HTTP/2 stream (RST_STREAM).');
+                        if ($frameStream === $streamId) {
+                            throw new HttpException('The server reset the HTTP/2 stream (RST_STREAM).');
+                        }
+                        break;
 
                     case 7: // GOAWAY
                         $streamEnded = true;
@@ -312,6 +408,9 @@ final class Client
             }
         }
 
+        if ($pendingContinuation) {
+            throw new HttpException('Incomplete HTTP/2 header block; CONTINUATION is missing.');
+        }
         if ($status === 0) {
             throw new HttpException('HTTP/2 response without a :status pseudo-header.');
         }
@@ -374,7 +473,19 @@ final class Client
         $head = substr($raw, 0, $separator);
         $payload = substr($raw, $separator + 4);
         $lines = explode("\r\n", $head);
-        if (!preg_match('#^HTTP/1\.[01]\s+(\d{3})#', $lines[0], $matches)) {
+        $statusLineIndex = 0;
+        while (isset($lines[$statusLineIndex])
+            && preg_match('#^HTTP/1\.[01]\s+100(?:\s|$)#i', $lines[$statusLineIndex]) === 1) {
+            $nextSeparator = strpos($payload, "\r\n\r\n");
+            if ($nextSeparator === false) {
+                throw new HttpException('Incomplete HTTP/1.1 informational response.');
+            }
+            $head = substr($payload, 0, $nextSeparator);
+            $payload = substr($payload, $nextSeparator + 4);
+            $lines = explode("\r\n", $head);
+            $statusLineIndex = 0;
+        }
+        if (!preg_match('#^HTTP/1\.[01]\s+(\d{3})(?:\s|$)#', $lines[0], $matches)) {
             throw new HttpException('Invalid HTTP/1.1 status line.');
         }
 
@@ -435,7 +546,7 @@ final class Client
                 'deflate' => $this->decompressDeflate($body),
                 'br' => $this->decompressBrotli($body),
                 'zstd' => $this->decompressZstd($body),
-                default => throw new HttpException('Codificacion de contenido no soportada: ' . $codec),
+                default => throw new HttpException('Unsupported content encoding: ' . $codec),
             };
         }
 
@@ -496,18 +607,40 @@ final class Client
         while ($offset < $length) {
             $lineEnd = strpos($body, "\r\n", $offset);
             if ($lineEnd === false) {
-                break;
+                throw new HttpException('Incomplete HTTP/1.1 chunk size.');
             }
-            $size = hexdec(trim(explode(';', substr($body, $offset, $lineEnd - $offset))[0]));
+            $sizeLine = trim(explode(';', substr($body, $offset, $lineEnd - $offset))[0]);
+            if (preg_match('/^[0-9A-Fa-f]+$/', $sizeLine) !== 1) {
+                throw new HttpException('Invalid HTTP/1.1 chunk size.');
+            }
+            $size = hexdec($sizeLine);
             $offset = $lineEnd + 2;
             if ($size === 0) {
-                break;
+                if (substr($body, $offset, 2) === "\r\n") {
+                    $offset += 2;
+                }
+                if ($offset < $length) {
+                    while ($offset < $length) {
+                        $trailerEnd = strpos($body, "\r\n", $offset);
+                        if ($trailerEnd === false) {
+                            throw new HttpException('Incomplete HTTP/1.1 trailer.');
+                        }
+                        if ($trailerEnd === $offset) {
+                            return $decoded;
+                        }
+                        $offset = $trailerEnd + 2;
+                    }
+                }
+                return $decoded;
+            }
+            if ($offset + $size + 2 > $length) {
+                throw new HttpException('Incomplete HTTP/1.1 chunk.');
             }
             $decoded .= substr($body, $offset, (int) $size);
             $offset += (int) $size + 2;
         }
 
-        return $decoded;
+        throw new HttpException('Incomplete HTTP/1.1 chunked response.');
     }
 
     private static function settingsPayload(): string
@@ -555,6 +688,10 @@ final class Client
         if (strlen($buffer) < 9 + $length) {
             return null;
         }
+        $rawStream = unpack('N', substr($buffer, 5, 4))[1];
+        if (($rawStream & 0x80000000) !== 0) {
+            throw new HttpException('Invalid reserved bit in HTTP/2 frame stream identifier.');
+        }
 
         $frame = [
             'type' => ord($buffer[3]),
@@ -599,24 +736,122 @@ final class Client
 
     private function resolveLocation(string $base, string $location): string
     {
-        if (preg_match('#^https?://#i', $location) === 1) {
-            return $location;
+        $location = trim($location);
+        if ($location === '') {
+            throw new InvalidArgumentException('Redirect Location is empty.');
+        }
+        if (str_contains($location, "\r") || str_contains($location, "\n")) {
+            throw new InvalidArgumentException('Redirect Location contains line breaks.');
+        }
+        $baseParts = parse_url($base);
+        if ($baseParts === false) {
+            throw new InvalidArgumentException('Invalid base URL.');
+        }
+        $scheme = strtolower($baseParts['scheme'] ?? 'https');
+        $host = $baseParts['host'] ?? '';
+        $port = isset($baseParts['port']) ? ':' . $baseParts['port'] : '';
+
+        if (preg_match('#^([a-z][a-z0-9+.-]*):#i', $location, $match) === 1) {
+            $resolved = $location;
+        } elseif (str_starts_with($location, '//')) {
+            $resolved = $scheme . ':' . $location;
+        } else {
+            $origin = $scheme . '://' . $host . $port;
+            $basePath = $baseParts['path'] ?? '/';
+            $hash = strpos($location, '#');
+            if ($hash !== false) {
+                $location = substr($location, 0, $hash);
+            }
+            if (str_starts_with($location, '/')) {
+                $path = $location;
+            } elseif (str_starts_with($location, '?')) {
+                $parts = explode('?', $basePath, 2);
+                $path = $parts[0] . $location;
+            } else {
+                $slash = strrpos($basePath, '/');
+                $path = substr($basePath, 0, $slash === false ? 0 : $slash + 1) . $location;
+            }
+            $resolved = $origin . $this->normalizeUrlPath($path);
         }
 
-        $parts = parse_url($base);
-        $origin = $parts['scheme'] . '://' . $parts['host']
-            . (isset($parts['port']) ? ':' . $parts['port'] : '');
-
-        if (str_starts_with($location, '//')) {
-            return $parts['scheme'] . ':' . $location;
+        $parts = $this->assertValidHttpsUrl($resolved);
+        $resolved = $parts['scheme'] . '://' . $parts['host'];
+        if (isset($parts['port'])) {
+            $resolved .= ':' . $parts['port'];
         }
-        if (str_starts_with($location, '/')) {
-            return $origin . $location;
+        $resolved .= $parts['path'] ?? '/';
+        if (isset($parts['query'])) {
+            $resolved .= '?' . $parts['query'];
         }
+        return $resolved;
+    }
 
-        $directory = rtrim(dirname($parts['path'] ?? '/'), '/');
+    private function normalizeUrlPath(string $path): string
+    {
+        $query = '';
+        $question = strpos($path, '?');
+        if ($question !== false) {
+            $query = substr($path, $question);
+            $path = substr($path, 0, $question);
+        }
+        $trailingSlash = str_ends_with($path, '/');
+        $output = [];
+        foreach (explode('/', $path) as $segment) {
+            if ($segment === '' || $segment === '.') {
+                continue;
+            }
+            if ($segment === '..') {
+                array_pop($output);
+                continue;
+            }
+            $output[] = $segment;
+        }
+        $normalized = '/' . implode('/', $output);
+        if ($trailingSlash && $normalized !== '/') {
+            $normalized .= '/';
+        }
+        return $normalized . $query;
+    }
 
-        return $origin . $directory . '/' . $location;
+    private function sameOrigin(string $first, string $second): bool
+    {
+        $a = parse_url($first);
+        $b = parse_url($second);
+        if ($a === false || $b === false) {
+            return false;
+        }
+        $aPort = (int) ($a['port'] ?? 443);
+        $bPort = (int) ($b['port'] ?? 443);
+        return strtolower($a['scheme']) === strtolower($b['scheme'])
+            && strtolower($a['host']) === strtolower($b['host'])
+            && $aPort === $bPort;
+    }
+
+    /**
+     * @return array<string, int|string>
+     */
+    private function assertValidHttpsUrl(string $url): array
+    {
+        if (str_contains($url, "\r") || str_contains($url, "\n")) {
+            throw new InvalidArgumentException('Invalid URL: contains line breaks.');
+        }
+        $parts = parse_url($url);
+        if ($parts === false || !isset($parts['host'], $parts['scheme'])) {
+            throw new InvalidArgumentException('Invalid URL: ' . $url);
+        }
+        if (strtolower($parts['scheme']) !== 'https') {
+            throw new InvalidArgumentException('Only HTTPS URLs are supported.');
+        }
+        if (isset($parts['user']) || isset($parts['pass'])) {
+            throw new InvalidArgumentException('URLs containing user or password information are not supported.');
+        }
+        if (isset($parts['port']) && ($parts['port'] < 1 || $parts['port'] > 65535)) {
+            throw new InvalidArgumentException('Invalid URL port.');
+        }
+        if ($parts['host'] === '') {
+            throw new InvalidArgumentException('Invalid URL host.');
+        }
+        return $parts;
     }
 
     private function log(string $message): void

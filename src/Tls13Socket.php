@@ -5,18 +5,7 @@ namespace NativeHttp;
 
 use NativeHttp\Exception\TlsException;
 
-/**
- * Hand-written TLS 1.3 client on top of a plain TCP stream.
- *
- * The openssl extension cannot choose the TLS 1.3 cipher order, the curves,
- * the GREASE values or the extension order, which is exactly what a WAF looks
- * at to tell a browser from curl. This class builds the ClientHello byte by
- * byte and only borrows OpenSSL for individual primitives (X25519, AEAD,
- * certificate checks, RSA-PSS).
- *
- * Requires PHP >= 8.1 with the openssl and zlib extensions. Verifying
- * CertificateVerify with RSA-PSS needs gmp or, failing that, bcmath.
- */
+/** TLS 1.3 client on a plain TCP stream. */
 final class Tls13Socket
 {
     private const HRR_RANDOM = "\xCF\x21\xAD\x74\xE5\x9A\x61\x11\xBE\x1D\x8C\x02\x1E\x65\xB8\x91"
@@ -336,10 +325,6 @@ final class Tls13Socket
         stream_set_timeout($this->socket, $seconds, (int) round(($this->timeout - $seconds) * 1000000));
     }
 
-    // ------------------------------------------------------------------
-    // ClientHello
-    // ------------------------------------------------------------------
-
     private function buildClientHello(): string
     {
         $grease = self::greaseValue();
@@ -448,10 +433,6 @@ final class Tls13Socket
         return $out;
     }
 
-    // ------------------------------------------------------------------
-    // ServerHello and key derivation
-    // ------------------------------------------------------------------
-
     private function processServerHello(string $body): void
     {
         $offset = 34;
@@ -555,10 +536,6 @@ final class Tls13Socket
             $this->hashLength
         );
     }
-
-    // ------------------------------------------------------------------
-    // Server messages
-    // ------------------------------------------------------------------
 
     private function processEncryptedExtensions(string $body): void
     {
@@ -849,10 +826,6 @@ final class Tls13Socket
         $this->writeSequence = 0;
     }
 
-    // ------------------------------------------------------------------
-    // Record layer
-    // ------------------------------------------------------------------
-
     /**
      * @return array{type: int, body: string, raw: string}
      */
@@ -1016,10 +989,6 @@ final class Tls13Socket
             ($this->logger)($message);
         }
     }
-
-    // ------------------------------------------------------------------
-    // Utilidades criptograficas
-    // ------------------------------------------------------------------
 
     /**
      * @return array{0: string, 1: \OpenSSLAsymmetricKey|resource}
@@ -1207,10 +1176,6 @@ final class Tls13Socket
         }
         return $bytes;
     }
-
-    // ------------------------------------------------------------------
-    // Utilidades binarias
-    // ------------------------------------------------------------------
 
     public static function derToPem(string $der, string $label): string
     {

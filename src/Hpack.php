@@ -5,12 +5,7 @@ namespace NativeHttp;
 
 use RuntimeException;
 
-/**
- * HPACK header compression for HTTP/2 (RFC 7541).
- *
- * Encodes literals without Huffman coding and decodes all four field
- * representations, including Huffman-coded strings.
- */
+/** HPACK header compression for HTTP/2 (RFC 7541). */
 final class Hpack
 {
     /** @var array<int, array{0: string, 1: string}> */

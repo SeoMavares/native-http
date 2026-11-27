@@ -1,7 +1,6 @@
 # Architecture
 
-How NativeHttp works internally. Useful if you plan to modify it, debug it, or
-want to understand why it dodges blocks.
+How NativeHttp works internally. Useful if you plan to modify or debug it.
 
 ```
 ┌──────────────────────────────────────────────────────┐
@@ -188,3 +187,13 @@ client never asks for something it cannot read.
 - **`stream_socket_client` with `tcp://`** on purpose: TLS is the library's job.
 - **No global state**: each `Client` is independent and safe under PHP-FPM
   concurrency.
+
+## 10. Request safeguards
+
+- Only HTTPS URLs are accepted.
+- Redirect URLs are resolved relative to the current URL and checked as HTTPS.
+- Authorization, Cookie and Proxy-Authorization headers are removed when a
+  redirect changes origin.
+- Header and method names are validated before the request is sent.
+- Unknown client options and invalid numeric options are rejected.
+- HTTP/1.1 chunked responses and HTTP/2 header continuations are validated.

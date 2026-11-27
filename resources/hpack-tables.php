@@ -5,6 +5,8 @@ declare(strict_types=1);
  * HPACK tables (RFC 7541) generated from the official RFC text:
  * Appendix A (static table) and Appendix B (Huffman code).
  *
+ * This file is loaded by Hpack.php; applications do not need to include it.
+ *
  * huffman: [code => [bit_length, symbol]] (symbol 256 = EOS)
  */
 return [
