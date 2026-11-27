@@ -1,5 +1,7 @@
 # NativeHttp
 
+[![tests](https://github.com/SeoMavares/native-http/actions/workflows/tests.yml/badge.svg)](https://github.com/SeoMavares/native-http/actions/workflows/tests.yml)
+[![Packagist](https://img.shields.io/packagist/v/nativehttp/client.svg)](https://packagist.org/packages/nativehttp/client)
 [![PHP](https://img.shields.io/badge/php-%3E%3D8.1-777bb3.svg)](https://www.php.net/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Dependencies](https://img.shields.io/badge/dependencies-none-brightgreen.svg)](#requirements)
@@ -109,15 +111,9 @@ require 'vendor/autoload.php';
 use NativeHttp\Client;
 ```
 
-> The package follows PSR-4 (`NativeHttp\` → `src/`) and is ready for
-> Packagist. Until it is published there, point Composer at the repository:
->
-> ```json
-> {
->   "repositories": [{ "type": "vcs", "url": "https://github.com/SeoMavares/native-http" }],
->   "require": { "nativehttp/client": "^1.0" }
-> }
-> ```
+> The package follows PSR-4 (`NativeHttp\` → `src/`) and is published on
+> [Packagist](https://packagist.org/packages/nativehttp/client). The command
+> above was verified against `v1.1.0` on PHP 8.3.
 
 ### Without Composer (cPanel, FTP, shared hosting)
 
