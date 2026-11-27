@@ -31,6 +31,7 @@ echo $response['body'];     // raw content
 
 - [Features](#features)
 - [What can I use it for?](#what-can-i-use-it-for)
+- [Prior art](#prior-art)
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Quick start](#quick-start)
@@ -79,6 +80,37 @@ NativeHttp returns the response body sent by the server. JavaScript included in
 that HTML is returned as source; NativeHttp does not evaluate it in a browser
 engine. If the server has already generated content before sending the
 response, that generated content is available in the returned body.
+
+## Prior art
+
+Browser-impersonating TLS is not a new idea, and the handshake technique is not
+original to this project. If you are choosing between options, this is the
+honest comparison as of November 2026:
+
+| Project | Approach | PHP | HTTP/2 | Notes |
+|---|---|---|---|---|
+| `curl-impersonate` (C) | Patched curl/BoringSSL | n/a | yes | Where the technique comes from |
+| `utls` (Go) | Custom TLS library | n/a | via net/http | Reference Go implementation |
+| `exe/cloak` | TLS 1.3 from scratch on a plain socket | **>= 8.4** | enum only | Closest in architecture |
+| `hamaadraza/php-impersonate` | FFI / subprocess to native `curl-impersonate` | >= 8.2 | yes | Requires `ext-ffi` and a built library |
+| `kelvinzer0/curl-impersonate-php` | Wrapper around the binary | >= 5.4 | yes | Needs the binary present |
+| `vxsilisk/pulsarx` | `ext-curl` wrapper | >= 8.1 | yes | Requires `ext-curl` |
+| `he4rt/reqxide` | PSR-18 stack | **^8.4** | yes | Pulls PSR-18 and `nyholm/psr7` |
+| **nativehttp/client** | TLS 1.3 and HTTP/2 from scratch | **>= 8.1** | yes | Zero dependencies |
+
+`exe/cloak` is the nearest neighbour: it also builds TLS 1.3 by hand over
+`stream_socket_client('tcp://...')`. It declares an `HttpVersion::HTTP_2` case
+but only implements HTTP/1.1 — there is no ALPN extension or HPACK, so a server
+that requires `h2` will not see it as an HTTP/2 client.
+
+The gap this project fills is narrower than "nothing existed": it is the
+combination of PHP 8.1, no `ext-curl`, no `ext-ffi`, no dependencies, and HTTP/2
+with its own HPACK decoder. On shared hosting that combination is what you
+actually get to install.
+
+Every row above is verifiable in the linked Composer metadata or source. These
+projects move fast, so check before relying on a cell. Corrections are welcome
+as an issue.
 
 ## Requirements
 
