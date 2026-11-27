@@ -158,7 +158,7 @@ final class Client
 
         try {
             $tls->connect();
-            $this->log('TLS ok: ' . $tls->getCipherName() . ' / alpn ' . ($tls->getNegotiatedProtocol() ?: 'ninguno'));
+            $this->log('TLS ok: ' . $tls->getCipherName() . ' / alpn ' . ($tls->getNegotiatedProtocol() ?: 'none'));
 
             $response = $tls->getNegotiatedProtocol() === 'h2'
                 ? $this->http2Exchange($tls, $fields, $body)

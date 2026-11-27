@@ -140,14 +140,14 @@ final class Tls13Socket
     public function connect(): void
     {
         $this->openTransport();
-        $this->log('TCP conectado a ' . $this->host . ':' . $this->port);
+        $this->log('TCP connected to ' . $this->host . ':' . $this->port);
 
         [$this->x25519Public, $this->x25519Key] = self::generateX25519();
 
         $clientHello = $this->buildClientHello();
         $this->handshakeTranscript = $clientHello;
         $this->writePlainRecord(22, $clientHello);
-        $this->log('ClientHello enviado (' . strlen($clientHello) . ' bytes)');
+        $this->log('ClientHello sent (' . strlen($clientHello) . ' bytes)');
 
         $serverHello = $this->nextHandshakeMessage();
         if ($serverHello['type'] !== 2) {
@@ -192,7 +192,7 @@ final class Tls13Socket
 
         $this->sendClientFinished();
         $this->switchToApplicationKeys();
-        $this->log('Handshake TLS 1.3 completado (alpn=' . ($this->negotiatedProtocol ?: 'ninguno') . ')');
+        $this->log('TLS 1.3 handshake complete (alpn=' . ($this->negotiatedProtocol ?: 'none') . ')');
     }
 
     public function writeApplicationData(string $data): void
@@ -276,7 +276,7 @@ final class Tls13Socket
             $this->writeSequence = 0;
         }
 
-        $this->log('KeyUpdate TLS aplicado');
+        $this->log('TLS KeyUpdate applied');
     }
 
     public function isClosed(): bool
@@ -979,7 +979,7 @@ final class Tls13Socket
     private function throwAlert(string $payload): void
     {
         $description = strlen($payload) > 1 ? ord($payload[1]) : 0;
-        $name = self::ALERTS[$description] ?? ('alerta ' . $description);
+        $name = self::ALERTS[$description] ?? ('alert ' . $description);
         throw new TlsException('The server sent a TLS alert: ' . $name . '.');
     }
 
